@@ -1,0 +1,132 @@
+TPL-FRAME-1
+===========
+Frame Envelope
+--------------
+`mandatory` `server` `client`
+
+This TPL defines the wire-level frame structure used by the Rift Realtime Protocol (Rift/1).
+A **Frame** is the fundamental unit of exchange between client and server.
+Whether it is a handshake (Hello), subscription (Subscribe), message publish (Publish),
+acknowledgment (Ack), flow control, or error — everything is encapsulated within the same Frame.
+
+== Frame Fields
+
+A Frame contains the following field categories:
+
+[cols="1,2,1"]
+|===
+| Category | Fields | Required
+
+| Routing
+| `topic`, `event`, `stream_id`
+| optional
+
+| Correlation
+| `message_id`, `correlation_id`, `session_id`
+| optional
+
+| Tracing
+| `trace_id`, `timestamp`, `ttl_ms`
+| varies
+
+| Control
+| `frame_type`, `flags`, `codec`, `priority`
+| varies
+
+| Payload
+| `payload`
+| optional
+|===
+
+`frame_id`, `frame_type`, and `timestamp` are **required** on all frames.
+
+== Field Definitions
+
+[frame_id]:: Monotonically increasing sequence number within the current connection. Assigned by the sender, used for ordering, deduplication, and ack correlation.
+
+[frame_type]:: Frame category — one of `C` (Control), `D` (Data), `A` (Ack), `F` (Flow), `E` (Error). Transmitted as a single-byte tag.
+
+[codec]:: Payload encoding format — `J` (JSON) or `B` (CBOR). Negotiated during Hello and fixed for the connection lifetime.
+
+[session_id]:: Server-assigned ULID identifying the logical session. `null` before Hello completes.
+
+[stream_id]:: Groups frames into logical streams (e.g. correlating request and response for an RPC call).
+
+[topic]:: Target topic name for publish/subscribe operations. In control frames, identifies the operation target.
+
+[event]:: In Data frames: business message type (e.g. `"message"`, `"update"`). In Control frames: control operation type (e.g. `"hello"`, `"subscribe"`).
+
+[message_id]:: Globally unique message identifier (ULID or UUIDv7 recommended). Used for deduplication, ack correlation, and tracing.
+
+[correlation_id]:: Request-response correlation identifier. Set by the sender in a request; echoed in the corresponding reply. Foundation for RPC semantics.
+
+[trace_id]:: Distributed tracing identifier for end-to-end trace chains.
+
+[timestamp]:: Sender timestamp in milliseconds since Unix epoch. Used for TTL checks, latency measurement, and replay ordering.
+
+[ttl_ms]:: Message time-to-live in milliseconds. `null` means no TTL. Expired messages are discarded before delivery.
+
+[priority]:: Message priority level (0–5). Determines send order and backpressure drop strategy. Defaults to `Normal` (3) when absent.
+
+[payload]:: Business or control payload. Encoding format determined by `codec`. Ack, Flow, and Error frames typically carry no payload.
+
+== Frame Types
+
+[cols="1,1,3"]
+|===
+| Tag | Type | Description
+
+| `C`
+| Control
+| Protocol-level interactions: Hello/Welcome/Ready, Ping/Pong, Subscribe/Unsubscribe, Resume
+
+| `D`
+| Data
+| Business messages: Event, State, Command, Reply, Datagram, Stream, Snapshot
+
+| `A`
+| Ack
+| Confirms receipt of a previously received frame (reliable delivery semantics)
+
+| `F`
+| Flow
+| Backpressure notifications, window adjustments, degradation alerts
+
+| `E`
+| Error
+| Protocol errors, authorization errors, business errors, or system errors
+|===
+
+== Wire Example
+
+A JSON-encoded Data frame might look like:
+
+```json
+{
+  "version": 256,
+  "frame_id": 42,
+  "frame_type": "D",
+  "flags": 0,
+  "codec": "J",
+  "session_id": "01JZZZZZZZZZZZZZZZZZZZZZZ",
+  "topic": "chat/room1",
+  "event": "message",
+  "message_id": "01JZZZZZZZZZZZZZZZZZZZZZA",
+  "timestamp": 1719600000000,
+  "priority": 3,
+  "payload": "eyJ0ZXh0IjoiaGVsbG8ifQ=="
+}
+```
+
+== Conformance
+
+Implementations MUST:
+
+- Set `frame_id`, `frame_type`, and `timestamp` on every frame.
+- Use the negotiated `codec` for all frames after the handshake.
+- Treat unknown `frame_type` values as protocol errors.
+
+Implementations SHOULD:
+
+- Use ULID or UUIDv7 for `message_id` to ensure lexicographic sort order by creation time.
+- Include `trace_id` for distributed tracing in production deployments.

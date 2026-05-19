@@ -1,0 +1,80 @@
+TPL-VERSION-1
+==============
+Protocol Versioning
+-------------------
+`mandatory` `server` `client`
+
+This TPL defines the versioning scheme and negotiation rules for the
+Rift Realtime Protocol (Rift/1).
+
+== Version Encoding
+
+The protocol uses a two-part version number (`major.minor`) encoded as a
+single `u16`:
+
+```text
+encoded = major << 8 | minor
+```
+
+For example, Rift/1.0 encodes as `0x0100` (256 decimal).
+
+== Versioning Rules
+
+- **Major version** bumps indicate backwards-incompatible wire-format changes. A server MUST reject clients that advertise an unsupported major version.
+- **Minor version** bumps indicate backwards-compatible additions (e.g. new optional fields). A server SHOULD accept clients with an older minor version and simply ignore unknown fields.
+
+== Constants
+
+[cols="1,1,3"]
+|===
+| Constant | Value | Description
+
+| `PROTOCOL_NAME`
+| `"rift"`
+| Wire protocol identifier. Sent in `Hello.protocol`.
+
+| `PROTOCOL_MAJOR`
+| 1
+| Current major version.
+
+| `PROTOCOL_MINOR`
+| 0
+| Current minor version.
+
+| `SUPPORTED_MAJOR`
+| 1..=1
+| Range of major versions the server accepts.
+|===
+
+== Negotiation Flow
+
+```text
+Client                          Server
+  │                               │
+  │─ Hello { version: 0x0100 } ─>│
+  │                               │  extract major = 1
+  │                               │  check: 1 ∈ SUPPORTED_MAJOR?
+  │                               │
+  │  [if accepted: continue]      │
+  │  [if rejected: error frame]   │
+```
+
+. The client sends its encoded version in the Hello frame.
+. The server extracts the major version and checks it against `SUPPORTED_MAJOR`.
+. If the major version is not in the supported range, the server rejects the connection with `RIFT_PROTOCOL_VERSION_UNSUPPORTED`.
+. Otherwise the server accepts the client's major version.
+
+== Forward Compatibility
+
+A future Rift/2 server can still accept Rift/1 clients by extending the
+`SUPPORTED_MAJOR` range to `1..=2`. The `negotiate_major` function
+returns `Some(major)` if the client's major version falls within the
+supported range, or `None` otherwise.
+
+== Conformance
+
+Implementations MUST:
+
+- Encode the version as `major << 8 | minor` in the Hello frame.
+- Reject connections with `RIFT_PROTOCOL_VERSION_UNSUPPORTED` when the client's major version is outside `SUPPORTED_MAJOR`.
+- Accept clients with an older minor version and ignore unknown fields.

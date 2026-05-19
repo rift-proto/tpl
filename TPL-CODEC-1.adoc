@@ -1,0 +1,67 @@
+TPL-CODEC-1
+===========
+Codec Negotiation
+-----------------
+`mandatory` `server` `client`
+
+This TPL defines the codec negotiation mechanism for the Rift Realtime Protocol (Rift/1).
+The codec determines the payload encoding format used on the wire and is negotiated
+once during the Hello handshake, remaining fixed for the entire connection lifetime.
+
+== Supported Codecs
+
+[cols="1,1,3"]
+|===
+| Tag | Name | Description
+
+| `J`
+| JSON
+| Human-readable text encoding. Convenient for debugging and development.
+
+| `B`
+| CBOR
+| Binary encoding per https://datatracker.ietf.org/doc/html/rfc7049[RFC 7049]. The recommended default: smaller footprint and faster parsing.
+|===
+
+== Negotiation Flow
+
+```text
+Client                          Server
+  │                               │
+  │─ Hello { codecs: [B, J] } ─>│
+  │                               │  select first mutually supported codec
+  │<─ Welcome { codec: B } ─────│
+  │                               │
+  │  [all subsequent frames use B]│
+```
+
+. The client sends its `Hello` frame with a `codecs` list in order of preference.
+. The server selects the first codec in the client's list that it also supports.
+. The server reports the selected codec in the `Welcome` frame's `negotiated_codec` field.
+. All subsequent frames on this connection MUST use the negotiated codec.
+
+== Codec Offer Configuration
+
+The server operator configures which codecs are offered to clients. When the
+`codec_offer` list is empty, all compiled-in codecs are offered.
+
+```rust
+// Example: offer only CBOR in production
+let config = ServerConfig {
+    codec_offer: vec![CodecOffer::Cbor],
+    ..ServerConfig::default()
+};
+```
+
+== Conformance
+
+Implementations MUST:
+
+- Include at least one codec in the `Hello` frame's `codecs` field.
+- Use the negotiated codec for all frames after the `Welcome` is received.
+- Reject connections with `UnsupportedCodec` (close code 1003) if no mutually supported codec is found.
+
+Implementations SHOULD:
+
+- Prefer CBOR for production deployments (smaller size, faster parsing).
+- Support JSON for development and debugging convenience.
