@@ -1,0 +1,91 @@
+TPL-AUTH-1
+===========
+Authentication
+---------------
+`mandatory` `server` `client`
+
+This TPL defines the authentication mechanism in the Rift Realtime Protocol (Rift/1).
+The protocol supports pluggable authentication backends via the `AuthProvider` trait.
+
+== Authentication Modes
+
+During the Hello exchange, the client lists the authentication modes it supports.
+The server selects one (or rejects the connection if none are acceptable).
+
+[cols="1,3"]
+|===
+| Mode | Wire Name | Description
+
+| Bearer
+| `bearer`
+| Bearer token authentication (JWT or opaque token). The token is provided during the Hello exchange.
+
+| Cookie
+| `cookie`
+| Cookie-based authentication. Credentials are carried via HTTP cookies on the transport upgrade request.
+
+| mTLS
+| `mtls`
+| Mutual TLS authentication using client certificates. Validated during the TLS handshake.
+
+| SignedChallenge
+| `signed_challenge`
+| Challenge-response: the server sends a random challenge; the client signs it with a private key.
+
+| Anonymous
+| `anonymous`
+| Unauthenticated access. The server may restrict topics and operations available to anonymous clients.
+|===
+
+== Authentication Flow
+
+```text
+Client                                Server
+  │                                     │
+  │─ Hello { auth_modes: [bearer] } ──>│
+  │                                     │  select mode, validate credentials
+  │                                     │
+  │<─ Welcome { session_id } ─────────│  (on success)
+  │                                     │
+  │  OR                                 │
+  │                                     │
+  │<─ Error { RIFT_AUTH_* } ──────────│  (on failure)
+```
+
+== Auth Context
+
+On successful authentication, the server produces an `AuthContext` containing:
+
+- `client_id` — Unique client identifier assigned by the auth backend.
+- `claims` — Arbitrary claims returned by the identity provider (backend-specific).
+- `mode` — The authentication mode that was used.
+- `hints` — Authorization hints (see below).
+
+=== Authorization Hints
+
+Optional supplementary information for fine-grained access control:
+
+- `region` — Geographic or cloud region the client reports (e.g. `"us-east-1"`).
+- `device` — Device identifier (hardware serial or app-generated UUID).
+- `risk` — Risk score 0–100 (0 = trusted, 100 = high risk). Based on IP reputation, certificate age, etc.
+
+== Token Revocation
+
+The server supports revoking all credentials associated with a given `ClientId`.
+After revocation, subsequent authentication attempts with previously valid tokens MUST fail.
+
+== Authentication Failure Limits
+
+The server enforces a maximum number of consecutive authentication failures per
+connection (default: 3). Once this threshold is reached, the server closes the
+connection with close code `AuthFailed` (1004) and disallows immediate reconnection.
+
+== Conformance
+
+Implementations MUST:
+
+- Support at minimum `Bearer` and `Anonymous` authentication modes.
+- Reject connections with `RIFT_AUTH_REQUIRED` if authentication is required but no credentials are provided.
+- Reject connections with `RIFT_AUTH_INVALID` for malformed or unrecognized tokens.
+- Reject connections with `RIFT_AUTH_EXPIRED` for tokens past their validity window.
+- Enforce the `max_auth_failures` limit and close the connection when exceeded.

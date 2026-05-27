@@ -1,0 +1,146 @@
+TPL-HANDSHAKE-1
+===============
+Hello / Welcome / Ready Handshake
+---------------------------------
+`mandatory` `server` `client`
+
+This TPL defines the three-phase connection handshake in the Rift Realtime Protocol (Rift/1).
+
+== Handshake Flow
+
+```text
+Client                        Server
+  │                               │
+  │──── Hello ──────────────────>│  (auth + capabilities)
+  │                               │
+  │<─── Welcome ─────────────────│  (session + codec)
+  │                               │
+  │   [optional Resume exchange]  │
+  │                               │
+  │<─── Ready ───────────────────│  (limits + heartbeat)
+  │                               │
+  │   [data frames flow]          │
+```
+
+== Hello (Client → Server)
+
+The very first frame sent by the client after opening the transport connection.
+Advertises the client's capabilities for server-side negotiation.
+
+```yaml
+{
+  "protocol": "rift",
+  "version": 256,
+  "client_id": "device-abc",
+  "session_id": null,
+  "epoch": null,
+  "codecs": ["B", "J"],
+  "compression": [],
+  "auth_modes": ["bearer"],
+  "last_offsets": {},
+  "client_clock": 1719600000000,
+  "sdk": { "name": "rift-ts", "version": "0.2.0" },
+  "features": []
+}
+```
+
+Fields:
+
+- `protocol` — MUST be `"rift"`. The server rejects connections with an unrecognized protocol name.
+- `version` — Encoded protocol version (`major << 8 | minor`). For Rift/1.0: `0x0100` (256).
+- `client_id` — Optional opaque client identifier for logging, metrics, and session affinity.
+- `session_id` — Optional existing session ID for resumption.
+- `epoch` — Optional epoch for session resumption.
+- `codecs` — List of supported codecs in order of preference. At least one required.
+- `compression` — List of supported compression algorithms (optional).
+- `auth_modes` — List of authentication modes the client supports.
+- `last_offsets` — Per-topic last-seen offsets for session resumption.
+- `client_clock` — Client wall-clock time in milliseconds (for clock skew estimation).
+- `sdk` — Optional SDK identification metadata (`name`, `version`).
+- `features` — Optional list of protocol feature flags the client supports.
+
+== Welcome (Server → Client)
+
+Sent by the server after successful authentication. Confirms the negotiated
+parameters and assigns the session.
+
+```yaml
+{
+  "session_id": "01JZZZZZZZZZZZZZZZZZZZZZZ",
+  "epoch": 1,
+  "negotiated_codec": "B",
+  "negotiated_compression": null,
+  "server_time": 1719600000000,
+  "resume_window_ms": 300000,
+  "features": []
+}
+```
+
+Fields:
+
+- `session_id` — Unique session identifier assigned by the server (ULID).
+- `epoch` — Monotonically increasing epoch counter for this session.
+- `negotiated_codec` — Content codec selected from the client's list.
+- `negotiated_compression` — Compression algorithm selected, or null.
+- `server_time` — Server wall-clock time (for RTT and skew estimation).
+- `resume_window_ms` — Duration in ms the server retains session state after disconnection. 0 = no resume support.
+- `features` — Protocol feature flags supported by the server.
+
+== Resume (Optional)
+
+When the client includes a `session_id` in its Hello, the server attempts
+to restore the previous session. The outcome is reported in the Welcome:
+
+[cols="1,3"]
+|===
+| ResumeResult | Description
+
+| Resumed
+| Session fully resumed; all state restored.
+
+| Partial
+| Partially resumed; some messages may have been lost. Client should reconcile.
+
+| Rejected
+| Resume request rejected by the server (internal constraints).
+
+| Expired
+| Session state has expired and is no longer available.
+
+| Conflict
+| Another connection is already bound to this session.
+|===
+
+== Ready (Server → Client)
+
+The final handshake frame. Sent after the session is fully established
+(and any resume exchange is complete). Carries runtime parameters.
+
+```yaml
+{
+  "session_id": "01JZZZZZZZZZZZZZZZZZZZZZZ",
+  "epoch": 1,
+  "ping_interval_ms": 25000,
+  "pong_timeout_ms": 10000,
+  "max_missed_pongs": 2,
+  "idle_timeout_ms": 300000,
+  "jitter_ms": 2500,
+  "max_payload_bytes": 65536,
+  "max_topics_per_connection": 128,
+  "max_send_queue_bytes": 1048576,
+  "server_time": 1719600000000
+}
+```
+
+After receiving Ready, the client may begin publishing and subscribing to topics.
+
+== Conformance
+
+Implementations MUST:
+
+- Send `protocol: "rift"` in the Hello frame.
+- Include at least one codec in the Hello `codecs` field.
+- Validate the protocol name and version before proceeding with authentication.
+- Send Welcome after successful authentication.
+- Send Ready after the session is fully established.
+- Clients MUST NOT send Data or Subscribe frames before receiving Ready.
