@@ -1,0 +1,139 @@
+TPL-SESSION-1
+=============
+Session & Resume
+----------------
+`mandatory` `server` `client`
+
+This TPL defines session management and the disconnect-resume mechanism
+in the Rift Realtime Protocol (Rift/1). A **session** represents a logical
+connection that can survive transport-layer reconnects through the resume mechanism.
+
+== Session Identifiers
+
+[cols="1,3"]
+|===
+| Identifier | Description
+
+| SessionId
+| A globally unique ULID identifying a single session instance. Generated server-side on first connection. Used to correlate reconnect attempts with the original session.
+
+| ClientId
+| A long-lived client identity (e.g. username, device ID) that persists across session expirations. Multiple sessions over time may share the same ClientId.
+|===
+
+== Session Lifecycle
+
+A session transitions through the following states:
+
+```text
+Open → Hello → Authenticated → Resuming → Ready → Active → Draining → Closed
+```
+
+[cols="1,3"]
+|===
+| State | Description
+
+| Open
+| Initial state immediately after session creation, before any frames are exchanged.
+
+| Hello
+| The Hello frame has been received; codec/version negotiation is in progress.
+
+| Authenticated
+| The client has been successfully authenticated. An AuthContext is attached.
+
+| Resuming
+| The client has requested a session resume. The server is evaluating offsets and replaying missed data.
+
+| Ready
+| Fully established and ready to subscribe or publish. All handshake steps are complete.
+
+| Active
+| Normal operational state — actively publishing or receiving messages.
+
+| Draining
+| Graceful shutdown in progress. In-flight messages are being drained; no new messages accepted.
+
+| Closed
+| Permanently closed. No further operations permitted. The session object may be garbage-collected.
+|===
+
+== Epoch
+
+Each session has a monotonically increasing epoch counter (starting at 1).
+The epoch is bumped on each resume attempt so stale client connections can be
+detected and rejected. The client must echo the server-assigned epoch when
+attempting to resume.
+
+== Offset Tracking
+
+The server tracks the last processed offset per topic for each session.
+When a client reconnects it submits its `last_offsets`, and the server uses
+those offsets (along with the current head offsets) to decide what data the
+client missed.
+
+== Resume Flow
+
+```text
+Client                                    Server
+  │                                         │
+  │─ Hello { session_id, epoch, offsets } ─>│
+  │                                         │  1. locate session
+  │                                         │  2. validate epoch
+  │                                         │  3. compare offsets
+  │<─ Welcome { resume_result } ───────────│
+  │                                         │
+  │<─ [replayed messages if needed] ───────│
+  │                                         │
+  │<─ Ready ───────────────────────────────│
+```
+
+=== Resume Decision Logic
+
+. Empty `last_offsets` → *ColdStart* (client must re-subscribe from scratch).
+. Any topic missing from the server → *SnapshotRequired*.
+. Client offset ahead of server on any topic → *Rejected* (data corruption or protocol violation).
+. Client behind by exactly 1 on every lagging topic → *Replaying* (lightweight replay).
+. Client behind by more than 1 on any topic → *PartialResume* (partial replay needed).
+. All offsets match → *FullResume* (no replay needed, client proceeds immediately).
+
+=== Resume Outcomes
+
+[cols="1,3"]
+|===
+| Outcome | Description
+
+| Resumed
+| Session fully resumed. Client's offsets match the server head. No replay needed.
+
+| Partial
+| Some topics required a replay. Client should process replayed frames before continuing.
+
+| Replaying
+| Server is still replaying data. Client should wait until replay completes.
+
+| SnapshotRequired
+| At least one topic no longer exists or has been compacted. Client must pull a fresh snapshot.
+
+| ColdStart
+| Client submitted empty offsets. Must re-subscribe to all desired topics from scratch.
+
+| Rejected
+| Resume attempt rejected (epoch mismatch, client ahead). Client must establish a new session.
+|===
+
+== Resume Window
+
+The server retains session state for a configurable duration (`resume_window_ms`)
+after disconnection. Within this window, the client can reconnect and resume.
+After expiry, the session is garbage-collected and the client must start fresh.
+
+== Conformance
+
+Implementations MUST:
+
+- Generate SessionId as a ULID.
+- Track per-session per-topic offsets.
+- Validate the epoch on resume attempts (reject mismatches).
+- Include `resume_result` in the Welcome frame when a session_id is present.
+- Support at minimum `FullResume`, `Replaying`, and `ColdStart` outcomes.

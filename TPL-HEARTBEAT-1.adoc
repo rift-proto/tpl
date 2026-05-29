@@ -1,0 +1,87 @@
+TPL-HEARTBEAT-1
+================
+Heartbeat
+---------
+`mandatory` `server` `client`
+
+This TPL defines the heartbeat mechanism in the Rift Realtime Protocol (Rift/1).
+The heartbeat ensures both sides can detect unresponsive peers promptly.
+
+== Mechanism
+
+. The client sends a **Ping** frame at least every `ping_interval`.
+. The server must reply with a **Pong** frame within `pong_timeout`.
+. If `max_missed_pongs` consecutive Pongs are not received, the connection is considered dead and will be closed.
+. Any frame received from the remote peer also acts as a heartbeat (liveness signal), resetting the idle timer.
+
+== Heartbeat Parameters
+
+Delivered to the client in the Ready frame:
+
+[cols="2,1,3"]
+|===
+| Parameter | Default | Description
+
+| `ping_interval`
+| 25,000 ms
+| Minimum interval between consecutive Ping frames the client must send.
+
+| `pong_timeout`
+| 10,000 ms
+| Maximum time to wait for a Pong reply after sending a Ping.
+
+| `max_missed_pongs`
+| 2
+| Number of consecutive missed Pongs that triggers connection teardown.
+
+| `idle_timeout`
+| 300,000 ms
+| If no frames of any kind are received within this window, the connection is closed with `IdleTimeout` (1013).
+
+| `jitter`
+| 2,500 ms
+| Maximum random jitter added to the client-side ping interval to prevent thundering herd.
+|===
+
+== Effective Ping Interval
+
+The actual interval between Ping frames on the client side is:
+
+```text
+effective = ping_interval + random(0 ..= jitter)
+```
+
+This prevents many clients from sending heartbeats at the exact same instant,
+which could cause a traffic spike across a large fleet.
+
+== Heartbeat Flow
+
+```text
+Client                          Server
+  │                               │
+  │─ Ping ──────────────────────>│
+  │<─ Pong ──────────────────────│  (within pong_timeout)
+  │                               │
+  │─ [any data frame] ─────────>│  (also acts as heartbeat)
+  │                               │
+  │─ Ping ──────────────────────>│  (no response...)
+  │─ Ping ──────────────────────>│  (still no response...)
+  │  [max_missed_pongs reached]   │
+  │  [connection closed]          │
+```
+
+== Dead Connection Detection
+
+A connection is deemed dead when `max_missed_pongs` consecutive Ping frames
+have been sent without receiving a Pong (or any other frame) back.
+At that point the connection is closed with an appropriate close code.
+
+== Conformance
+
+Implementations MUST:
+
+- Send Ping frames at least every `ping_interval + jitter` milliseconds.
+- Reply to received Ping frames with Pong frames.
+- Close the connection after `max_missed_pongs` consecutive missed Pongs.
+- Close the connection with `IdleTimeout` (1013) when no frames are received within `idle_timeout`.
+- Treat any received frame as a liveness signal, resetting the idle timer.
