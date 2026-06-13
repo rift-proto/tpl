@@ -1,0 +1,106 @@
+TPL-SUB-1
+=========
+Subscribe Modes
+---------------
+`mandatory` `server` `client`
+
+This TPL defines the subscription modes and acknowledgment semantics
+in the Rift Realtime Protocol (Rift/1).
+
+== Subscribe Modes
+
+When a client joins a topic, it specifies a `SubscribeMode` that determines
+the scope and method of message reception:
+
+[cols="1,3"]
+|===
+| Mode | Description
+
+| Live
+| Only receive new messages that arrive after the subscription is established.
+
+| Replay
+| Replay historical messages starting from a specified offset; no real-time messages.
+
+| SnapshotThenLive
+| Send a snapshot first, then switch to live mode. Recommended for UI synchronization.
+
+| Latest
+| Only fetch the latest state snapshot of the topic.
+
+| Passive
+| Does not count toward the subscriber count and does not affect retention policy.
+
+| Ephemeral
+| Not persisted, not restored after disconnection.
+|===
+
+== Subscribe Flow
+
+```text
+Client                                Server
+  │                                     │
+  │─ Subscribe { topic, mode } ───────>│
+  │                                     │  validate topic, auth, limits
+  │<─ SubscribeResult { status } ──────│
+  │                                     │
+  │  [if accepted: receive messages]    │
+```
+
+== Subscribe Results
+
+Status codes returned by the server after processing a subscribe request:
+
+[cols="1,3"]
+|===
+| Result | Description
+
+| Accepted
+| Subscription accepted. Messages will be delivered according to the selected mode.
+
+| Denied
+| Subscription denied — insufficient permissions or policy restrictions.
+
+| NotFound
+| Topic does not exist and auto-creation is not allowed.
+
+| Gone
+| Topic is closed and no longer accepting subscriptions.
+
+| ReplayRequired
+| Server requires the client to specify a replay offset (historical messages available).
+
+| SnapshotRequired
+| Snapshot-mode subscription. Client must fetch a snapshot first.
+
+| RateLimited
+| Subscription request was rate-limited. Client should retry after backoff.
+
+| Overloaded
+| Server is temporarily overloaded, rejecting the request.
+
+| InvalidFilter
+| Filter expression has a syntax error.
+|===
+
+== Unsubscribe
+
+A client sends an Unsubscribe control frame to leave a topic.
+The server stops delivering messages and decrements the subscriber count.
+
+```text
+Client                                Server
+  │                                     │
+  │─ Unsubscribe { topic } ───────────>│
+  │                                     │  remove subscription
+  │<─ UnsubscribeResult ──────────────│
+```
+
+== Conformance
+
+Implementations MUST:
+
+- Validate topic existence and permissions before accepting a subscription.
+- Return an appropriate `SubscribeResult` status code for every subscribe request.
+- Support at minimum `Live` and `SnapshotThenLive` modes.
+- Decrement subscriber counts on unsubscribe.

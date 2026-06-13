@@ -1,0 +1,263 @@
+TPL-MSG-1
+=========
+Message Types
+-------------
+`mandatory` `server` `client`
+
+This TPL defines the eight message classes of the Rift Realtime Protocol (Rift/1).
+Each message class determines delivery semantics, retention policy, and client-side handling.
+Messages are carried inside Data frames (`frame_type = D`).
+
+== Message Classes
+
+[cols="1,1,1,2"]
+|===
+| Class | Wire Name | Default Delivery | Purpose
+
+| Event
+| `event`
+| AtLeastOnce
+| Business events in the publish/subscribe model
+
+| Command
+| `command`
+| AtLeastOnce
+| Request-style commands carrying a `correlation_id` (RPC semantics)
+
+| Reply
+| `reply`
+| AtLeastOnce
+| Command responses paired with a Command via `correlation_id`
+
+| State
+| `state`
+| LatestOnly
+| State messages — only the latest value per `state_key` is valid
+
+| Datagram
+| `datagram`
+| BestEffort
+| High-frequency, loss-tolerant datagrams (mouse movement, typing indicators)
+
+| Stream
+| `stream`
+| DurableOrdered
+| Continuously ordered segments (AI tokens, file chunks, audio/video frames)
+
+| Snapshot
+| `snapshot`
+| AtLeastOnce
+| Topic state snapshots for fast initialization after reconnection
+
+| System
+| `system`
+| AtLeastOnce
+| System control messages used internally by the protocol
+|===
+
+== Delivery Modes
+
+[cols="1,3"]
+|===
+| Mode | Description
+
+| AtMostOnce
+| No retries, no acknowledgment, may be lost.
+
+| AtLeastOnce
+| May be duplicated; the receiver must deduplicate.
+
+| ExactlyOnceEffect
+| Guarantees equivalent-to-exactly-once semantics through idempotency.
+
+| LatestOnly
+| Old messages are overwritten by newer ones (e.g. state messages).
+
+| BestEffort
+| No delivery guarantee, suitable for high-frequency, low-value data.
+
+| DurableOrdered
+| Written to a persistent log and delivered strictly in offset order.
+|===
+
+== Event
+
+The most commonly used message type. A publisher sends an Event to a topic,
+and all subscribers receive it according to delivery semantics.
+
+```yaml
+{
+  "event": "chat.message.created",
+  "message_id": "01JZZZZZZZZZZZZZZZZZZZZZZ",
+  "schema": "chat.message.created@1.0",
+  "payload": { "text": "hello world" },
+  "dedupe_key": null,
+  "ordering_key": null,
+  "ttl_ms": null
+}
+```
+
+Fields:
+
+- `event` — Dotted hierarchical event name (e.g. `"chat.message.created"`).
+- `message_id` — Globally unique ID (ULID or UUIDv7 recommended).
+- `schema` — Schema identifier formatted as `{domain}.{name}@{major}.{minor}`.
+- `payload` — Business payload in JSON.
+- `dedupe_key` — Optional deduplication key. Duplicate messages with the same key within the dedupe window are rejected.
+- `ordering_key` — Optional ordering key. Messages sharing the same key are strictly ordered; different keys have no ordering guarantee.
+- `ttl_ms` — Optional TTL in milliseconds.
+
+== Command / Reply
+
+Implements RPC semantics: a client sends a Command (carrying a `correlation_id`),
+the server processes it and returns a Reply (carrying the same `correlation_id`).
+
+```text
+Client                         Server
+  |                               |
+  |-- Command { corr_id=42 } --->|
+  |                               |  (process command)
+  |<-- Reply { corr_id=42 } -----|
+  |                               |
+```
+
+Command fields:
+
+- `command` — Operation name (e.g. `"room.create"`). Convention: `{domain}.{action}`.
+- `correlation_id` — Must be unique within the connection. Echoed in the Reply.
+- `timeout_ms` — If no Reply within this duration, the client treats it as a timeout.
+- `idempotency_key` — Optional. Duplicate requests with the same key return the cached response.
+- `payload` — Command arguments in JSON.
+- `schema` — Schema identifier.
+
+Reply fields:
+
+- `correlation_id` — Echoed from the original Command.
+- `status` — One of `ok`, `error`, `timeout`, `rejected`.
+- `payload` — Response payload (only on success).
+- `error` — Structured error info: `{ code, message }` (only for error/rejected).
+- `server_time` — Server timestamp for clock calibration.
+
+== State
+
+State messages differ from Events: only the latest value per `state_key` is retained.
+Old values are overwritten; no history is kept.
+
+```yaml
+{
+  "state_key": "cursor",
+  "name": "cursor position",
+  "value": { "x": 1, "y": 2 },
+  "ttl_ms": null,
+  "subject": "user-42",
+  "updated_at": 1719600000000
+}
+```
+
+Fields:
+
+- `state_key` — Unique dimension identifier within the topic (e.g. `"cursor"`, `"typing:user-42"`).
+- `value` — Current state in JSON.
+- `ttl_ms` — Optional. After expiry, the state is automatically cleared.
+- `subject` — The user, device, or connection that initiated the update.
+- `updated_at` — Update timestamp.
+
+=== Presence
+
+Presence is a specialized State for representing a user's online status:
+
+```yaml
+{
+  "subject": "user-42",
+  "status": "online",
+  "session_id": "s-1",
+  "connection_id": "c-1",
+  "ttl_ms": 30000,
+  "metadata": null,
+  "updated_at": 1719600000000
+}
+```
+
+Standard status values: `"online"`, `"away"`, `"busy"`, `"offline"`.
+After the TTL expires, the server automatically reverts the status to `"offline"`.
+
+== Datagram
+
+High-frequency, discardable messages for loss-tolerant scenarios.
+
+```yaml
+{
+  "schema": "game.position@1.0",
+  "event": "move",
+  "payload": { "x": 10, "y": 20 }
+}
+```
+
+Characteristics:
+
+- Not persisted; not written to the replay log.
+- No acknowledgments (Acks).
+- Preferentially dropped under backpressure.
+- Default delivery mode: `BestEffort`.
+
+== Stream Segment
+
+An ordered segment within a continuous stream, identified by `stream_id`.
+All segments of the same stream are strictly ordered by `seq`.
+
+```text
+Seg 0 ──> Seg 1 ──> Seg 2 ──> ... ──> Seg N (final)
+  seq=0    seq=1    seq=2              seq=N, final_segment=true
+```
+
+```yaml
+{
+  "stream_id": "01JZZZZZZZZZZZZZZZZZZZZZS",
+  "seq": 3,
+  "final_segment": false,
+  "schema": "ai.token@1.0",
+  "payload": { "text": "hello" }
+}
+```
+
+Fields:
+
+- `stream_id` — All segments of the same stream share this value.
+- `seq` — Monotonically increasing sequence number starting from 0.
+- `final_segment` — `true` indicates the stream has ended.
+- `schema` — Defines the payload structure.
+- `payload` — Segment data in JSON.
+
+== Snapshot
+
+A complete state representation of a topic at a specific offset, used for fast initialization.
+
+```yaml
+{
+  "topic": "room/1",
+  "snapshot_id": "snap-1",
+  "base_offset": 42,
+  "schema": "room.snapshot@1.0",
+  "payload": { "messages": [...] },
+  "created_at": 1719600000000,
+  "expires_at": 1719603600000,
+  "checksum": null
+}
+```
+
+Use cases:
+
+- **Reconnection recovery** — Client offset too stale; fetch snapshot first, then consume incremental messages.
+- **New subscriber init** — `SnapshotThenLive` subscribe mode sends a snapshot before live messages.
+- **Periodic compaction** — Create snapshots and clean up historical messages before the snapshot's offset.
+
+Recovery begins consuming from `base_offset + 1`.
+
+== Conformance
+
+Implementations MUST:
+
+- Set the `event` field to indicate the message class when encoding into a Data frame.
+- Validate `correlation_id` is non-empty for Command messages.
+- Use `LatestOnly` delivery mode for State messages.
+- Treat `final_segment = true` as a stream termination signal.
