@@ -1,0 +1,133 @@
+TPL-ACK-1
+=========
+Acknowledgement System
+----------------------
+`mandatory` `server` `client`
+
+This TPL defines the acknowledgement system in the Rift Realtime Protocol (Rift/1).
+Acks provide reliable delivery semantics by confirming to publishers that their
+messages have been received, persisted, or delivered.
+
+== Lifecycle
+
+When a publisher sends a Data frame with the `REQUIRES_ACK` flag set:
+
+```text
+Publisher                         Server                         Subscriber
+  │                                 │                               │
+  │─ Data { msg_id, REQUIRES_ACK }>│                               │
+  │                                 │  publish + track              │
+  │<─ Ack { received } ───────────│                               │
+  │                                 │─ deliver ───────────────────>│
+  │                                 │                               │
+  │                                 │<─ subscriber ack ────────────│
+  │<─ Ack { delivered } ──────────│                               │
+  │                                 │                               │
+```
+
+== Ack Statuses
+
+Each status represents a stage in the message processing pipeline:
+
+[cols="1,3"]
+|===
+| Status | Description
+
+| Received
+| The server has received the message but has not yet processed it.
+
+| Accepted
+| The message has been accepted by the server (semantic validation passed).
+
+| Persisted
+| The message has been durably persisted (written to the replay log or external store).
+
+| Delivered
+| The message has been delivered to all (or a quorum of) subscribers.
+
+| Processed
+| The message has been processed by a subscriber (end-to-end acknowledgement).
+
+| Rejected
+| The message was rejected (schema mismatch, policy violation, etc.).
+
+| Expired
+| The message expired (TTL exceeded) before it could be delivered.
+
+| Duplicate
+| The message is a duplicate of one already seen (deduplication window).
+
+| Failed
+| The message could not be delivered due to an internal error.
+|===
+
+== Ack Policies
+
+The policy determines the level of delivery guarantee the server must achieve
+before sending an acknowledgement back to the publisher:
+
+[cols="1,3"]
+|===
+| Policy | Description
+
+| None
+| No acknowledgement is sent. The publisher fire-and-forgets.
+
+| Server
+| The server acknowledges receipt (before persistence or delivery).
+
+| Persisted
+| The server acknowledges after the message is durably persisted.
+
+| Quorum
+| The server acknowledges after a quorum of replicas has persisted the message.
+
+| Subscriber
+| The server acknowledges after the message has been delivered to all subscribers.
+
+| Application
+| The server acknowledges after the application layer confirms processing (end-to-end).
+|===
+
+== Ack Payload
+
+The acknowledgement frame carries:
+
+```yaml
+{
+  "ack_id": "550e8400-e29b-41d4-a716-446655440000",
+  "message_id": "01JZZZZZZZZZZZZZZZZZZZZZZ",
+  "status": "persisted",
+  "offset": 42,
+  "reason": null,
+  "error_code": null,
+  "retry_after_ms": null,
+  "server_time": 1719600000000
+}
+```
+
+Fields:
+
+- `ack_id` — Unique acknowledgement identifier (UUIDv4).
+- `message_id` — The message this ack corresponds to.
+- `status` — The ack status (see table above).
+- `offset` — Broker-assigned offset of the persisted message, if applicable.
+- `reason` — Human-readable reason (for error statuses).
+- `error_code` — Machine-readable error code, if applicable.
+- `retry_after_ms` — Suggested retry delay for rate-limiting or overload responses.
+- `server_time` — Server timestamp when the ack was generated.
+
+== Ack Timeout
+
+The server tracks outstanding (sent-but-not-acked) messages per session.
+If the ack timeout elapses without a response, the message is marked as timed out
+and counted in the `ack_timeout_total` metric.
+
+== Conformance
+
+Implementations MUST:
+
+- Send an Ack frame for every received frame with the `REQUIRES_ACK` flag set.
+- Include the `message_id` of the original frame in the Ack.
+- Track outstanding acks per session and handle timeouts.
+- Use `ack_id` to correlate ack responses.

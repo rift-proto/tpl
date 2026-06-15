@@ -1,0 +1,128 @@
+TPL-TOPIC-1
+===========
+Topic Profiles
+--------------
+`mandatory` `server`
+
+This TPL defines the topic abstraction in the Rift Realtime Protocol (Rift/1).
+A **topic** is a named, policy-governed channel that producers publish to and
+consumers subscribe from. Each topic carries its own configurable profile.
+
+== Topic Name Rules
+
+Topic names are UTF-8 strings. A valid topic name:
+
+- MUST NOT be empty.
+- MUST NOT exceed 255 bytes.
+- SHOULD use `/` as a hierarchical separator (e.g. `"chat/room1"`).
+
+== Topic Profile
+
+A `TopicProfile` bundles all configurable policies for a single topic:
+
+[cols="2,1,2"]
+|===
+| Field | Default | Description
+
+| `retention`
+| `Latest`
+| How long messages are kept in the replay log before eviction.
+
+| `ordering`
+| `Topic`
+| Message ordering guarantee applied to delivery.
+
+| `max_subscribers`
+| 10,000
+| Maximum concurrent subscribers. Excess attempts are rejected.
+
+| `max_publishers`
+| 10,000
+| Maximum concurrent publishers. Excess attempts are rejected.
+
+| `rate_limit_per_publisher`
+| none
+| Per-publisher rate limit in messages/second.
+
+| `rate_limit_total`
+| none
+| Aggregate topic-wide rate limit in messages/second.
+
+| `replay_enabled`
+| `true`
+| Whether late-joining subscribers can replay from the retention log.
+
+| `snapshot_enabled`
+| `true`
+| Whether the broker maintains a latest-value snapshot.
+
+| `replay_window`
+| 300s
+| Duration messages remain available for replay after publication.
+|===
+
+== Retention Policies
+
+[cols="1,3"]
+|===
+| Policy | Description
+
+| None
+| Messages are discarded immediately after fanout. Subscribers not connected at publication time will never see them.
+
+| Ttl(Duration)
+| Retain messages for at most the given duration. Older messages are evicted on the next append.
+
+| Count(usize)
+| Retain at most `n` messages. Oldest messages are evicted in FIFO order when exceeded.
+
+| Size(usize)
+| Retain at most `n` bytes of total payload. Oldest entries are evicted until the log fits.
+
+| Durable
+| Retention managed by an external durable storage backend. The in-memory log retains all entries.
+
+| Latest
+| Only the latest message is kept. After each append all older entries are evicted. The most aggressive policy.
+|===
+
+== Ordering Policies
+
+From weakest to strongest:
+
+[cols="1,3"]
+|===
+| Policy | Description
+
+| None
+| No ordering guarantee — messages may arrive in any order.
+
+| Connection
+| Messages from a single connection arrive in the order they were received on that connection.
+
+| Publisher
+| Messages from a single publisher (identified by `session_id`) arrive in order, even across reconnects.
+
+| Topic
+| All messages on the topic share a single monotonic offset sequence and are delivered in that order (default).
+
+| Key
+| Messages with the same `ordering_key` arrive in order. Different keys may be interleaved.
+
+| Causal
+| Messages arrive in causal order, requiring vector-clock metadata on each frame.
+|===
+
+== Auto-Creation
+
+When a client subscribes to a topic that does not yet exist, the server MAY
+auto-create it using the `DefaultTopicProfile`. Server operators can disable
+auto-creation to enforce explicit topic provisioning.
+
+== Conformance
+
+Implementations MUST:
+
+- Enforce `max_subscribers` and `max_publishers` limits, returning appropriate error codes when exceeded.
+- Apply the configured retention policy on every message append.
+- Use the configured ordering policy to sequence deliveries to subscribers.
