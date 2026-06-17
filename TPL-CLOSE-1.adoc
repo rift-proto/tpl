@@ -1,0 +1,118 @@
+TPL-CLOSE-1
+============
+Close Codes
+-----------
+`mandatory` `server` `client`
+
+This TPL defines the structured close codes used when a Rift/1 connection is shut down.
+A close code is carried in a Close frame and tells the remote peer _why_ the connection
+was terminated and whether reconnection is advisable.
+
+== Close Code Table
+
+[cols="1,1,3,1"]
+|===
+| Code | Name | Description | Reconnect?
+
+| 1000
+| Normal
+| Connection terminated deliberately after all pending work was drained.
+| No
+
+| 1001
+| Draining
+| Server is draining its outbound message queue before shutdown.
+| Yes (brief wait)
+
+| 1002
+| ProtocolError
+| Remote peer sent a frame that does not conform to the Rift/1 specification.
+| No
+
+| 1003
+| UnsupportedCodec
+| Client requested a codec the server does not support.
+| No (fix codec list)
+
+| 1004
+| AuthFailed
+| Supplied credentials were invalid, signatures didn't match, or identity couldn't be verified.
+| No (fix credentials)
+
+| 1005
+| AuthExpired
+| Credentials (e.g. bearer token) have passed their validity window.
+| Yes (refresh token)
+
+| 1006
+| PermissionRevoked
+| Credentials are still structurally valid but have been explicitly revoked by an administrator.
+| No (re-authenticate)
+
+| 1007
+| SessionConflict
+| Another connection is already bound to the session identifier requested by this client.
+| Yes (wait or new session)
+
+| 1008
+| RateLimited
+| Client is sending frames faster than the server's rate-limiting threshold allows.
+| Yes (reduce rate)
+
+| 1009
+| PayloadTooLarge
+| A single frame's payload exceeds the maximum size the server accepts.
+| Yes (reduce size)
+
+| 1010
+| SlowConsumer
+| Client's outbound queue is backing up because the client is not reading frames quickly enough.
+| Yes (drain faster)
+
+| 1011
+| ServerOverloaded
+| Server is running low on critical resources (CPU, memory, connections).
+| Yes (backoff)
+
+| 1012
+| ShardMoved
+| Topic partition has been migrated to a different server node.
+| Yes (reconnect to new node)
+
+| 1013
+| IdleTimeout
+| No frames were received within the configured idle-timeout window.
+| Yes (reconnect)
+
+| 1014
+| ClientUpgradeRequired
+| Server requires a newer SDK version.
+| Yes (after upgrade)
+
+| 1015
+| PolicyViolation
+| Client's behavior violates a server-side policy (e.g. illegal topic name).
+| No (fix behavior)
+|===
+
+== Relationship to WebSocket Close Codes
+
+The numbering scheme is inspired by https://tools.ietf.org/html/rfc6455#section-7.4[RFC 6455 §7.4],
+but the semantics are entirely Rift-specific and MUST NOT be confused with WebSocket close codes.
+
+== Wire Format
+
+Close codes are transmitted as `u16` values in the Close frame. The defined range is:
+
+- `1000` — Normal closure.
+- `1001 – 1015` — Rift-defined close reasons.
+- Other values — Reserved / undefined.
+
+== Conformance
+
+Implementations MUST:
+
+- Include a close code in every Close frame.
+- Use the defined numeric values exactly as specified.
+- Handle unknown close codes gracefully (treat as unexpected disconnection).
+- Clients SHOULD use the reconnection guidance above to decide whether to reconnect.

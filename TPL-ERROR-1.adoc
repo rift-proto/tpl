@@ -1,0 +1,211 @@
+TPL-ERROR-1
+============
+Error Codes
+-----------
+`mandatory` `server` `client`
+
+This TPL defines the structured error codes returned in Error frames
+(`frame_type = E`) in the Rift Realtime Protocol (Rift/1).
+
+Error codes are transmitted as stable `RIFT_*` string identifiers so that
+older clients can gracefully handle unknown codes without breaking.
+
+== Protocol Errors
+
+[cols="1,3,1"]
+|===
+| Code | Description | Retryable
+
+| RIFT_PROTOCOL_VERSION_UNSUPPORTED
+| Requested protocol version is not supported by the server.
+| No
+
+| RIFT_PROTOCOL_FRAME_INVALID
+| Received frame is structurally invalid (malformed header, missing required fields).
+| No
+
+| RIFT_PROTOCOL_CODEC_UNSUPPORTED
+| Requested content codec is not supported.
+| No
+
+| RIFT_PROTOCOL_PAYLOAD_TOO_LARGE
+| Frame payload exceeds the server's configured maximum size.
+| No
+
+| RIFT_PROTOCOL_REQUIRED_FIELD_MISSING
+| A required field is missing from the frame.
+| No
+
+| RIFT_PROTOCOL_SCHEMA_MISMATCH
+| Frame contents do not match the expected schema.
+| No
+
+| RIFT_PROTOCOL_ORDER_VIOLATION
+| Frames were received out of the required order (e.g. Publish before Subscribe).
+| No
+|===
+
+== Authentication & Permission Errors
+
+[cols="1,3,1"]
+|===
+| Code | Description | Retryable
+
+| RIFT_AUTH_REQUIRED
+| Authentication required but no credentials were provided.
+| No
+
+| RIFT_AUTH_INVALID
+| Supplied credentials are syntactically or semantically invalid.
+| No
+
+| RIFT_AUTH_EXPIRED
+| Supplied credentials have expired.
+| No
+
+| RIFT_AUTH_REVOKED
+| Supplied credentials have been explicitly revoked.
+| No
+
+| RIFT_PERMISSION_DENIED
+| Authenticated principal does not have permission for the requested operation.
+| No
+
+| RIFT_TOPIC_FORBIDDEN
+| Authenticated principal is not allowed to access the requested topic.
+| No
+|===
+
+== Session & Resume Errors
+
+[cols="1,3,1"]
+|===
+| Code | Description | Retryable
+
+| RIFT_SESSION_NOT_FOUND
+| Referenced session could not be found (possibly garbage-collected).
+| No
+
+| RIFT_SESSION_EXPIRED
+| Referenced session has expired and is no longer valid.
+| No
+
+| RIFT_SESSION_CONFLICT
+| Another connection is already bound to the requested session.
+| No
+
+| RIFT_RESUME_REJECTED
+| Server rejected the client's resume request.
+| No
+
+| RIFT_REPLAY_OFFSET_EXPIRED
+| Requested replay offset has fallen outside the server's retention window.
+| Yes
+
+| RIFT_SNAPSHOT_REQUIRED
+| A full snapshot is required before the session can be resumed.
+| No
+|===
+
+== Topic Errors
+
+[cols="1,3,1"]
+|===
+| Code | Description | Retryable
+
+| RIFT_TOPIC_NOT_FOUND
+| Requested topic does not exist.
+| No
+
+| RIFT_TOPIC_CLOSED
+| Topic has been closed for publishing.
+| No
+
+| RIFT_TOPIC_OVERLOADED
+| Topic is temporarily overloaded.
+| Yes
+
+| RIFT_TOPIC_SUBSCRIBER_LIMIT
+| Topic has reached its maximum number of subscribers.
+| No
+
+| RIFT_TOPIC_PUBLISHER_LIMIT
+| Topic has reached its maximum number of publishers.
+| No
+
+| RIFT_TOPIC_RATE_LIMITED
+| Topic's per-publisher rate limit has been exceeded.
+| Yes
+|===
+
+== Message Errors
+
+[cols="1,3,1"]
+|===
+| Code | Description | Retryable
+
+| RIFT_MESSAGE_DUPLICATE
+| Message is a duplicate of one already processed.
+| No
+
+| RIFT_MESSAGE_EXPIRED
+| Message expired (TTL reached zero) before delivery.
+| No
+
+| RIFT_MESSAGE_REJECTED
+| Message was rejected by the topic's validation rules.
+| No
+
+| RIFT_MESSAGE_TOO_LARGE
+| Message payload exceeds the maximum allowed size.
+| No
+
+| RIFT_MESSAGE_ACK_TIMEOUT
+| Acknowledgement was not received within the configured timeout.
+| Yes
+
+| RIFT_MESSAGE_DELIVERY_FAILED
+| Message could not be delivered to its destination.
+| Yes
+|===
+
+== System Errors
+
+[cols="1,3,1"]
+|===
+| Code | Description | Retryable
+
+| RIFT_SYSTEM_OVERLOADED
+| Server is temporarily overloaded (CPU, memory, connections).
+| Yes
+
+| RIFT_SYSTEM_MAINTENANCE
+| Server is undergoing scheduled maintenance.
+| No
+
+| RIFT_SYSTEM_SHARD_MOVED
+| Relevant shard has moved to a different node.
+| Yes
+
+| RIFT_SYSTEM_REGION_UNAVAILABLE
+| Target region is currently unavailable.
+| Yes
+
+| RIFT_SYSTEM_INTERNAL
+| Unexpected internal error.
+| No
+|===
+
+== Retryability
+
+Implementations SHOULD retry with exponential backoff for retryable errors.
+Non-retryable errors indicate permanent failures that require corrective action
+(obtaining fresh credentials, fixing the frame, upgrading the SDK, etc.).
+
+== Conformance
+
+Implementations MUST:
+
+- Transmit error codes as their stable `RIFT_*` string identifier.
+- Handle unknown error codes gracefully (log and display, do not panic).
+- Include a human-readable description in the error frame payload.

@@ -1,0 +1,141 @@
+TPL-FLOW-1
+===========
+Flow Control
+------------
+`mandatory` `server`
+
+This TPL defines the flow control mechanisms in the Rift Realtime Protocol (Rift/1),
+covering both backpressure management and token-bucket rate limiting.
+
+== Backpressure
+
+The server monitors each connection's outbound message queue. When the queue
+exceeds its configured capacity, a mitigation strategy is applied.
+
+=== High-Water Mark
+
+The overload threshold is fixed at 90% of `max_send_queue_bytes`. When the
+queue crosses this mark, a flow-pause event is recorded. When it falls back
+below, a flow-resume event is recorded.
+
+=== Strategies
+
+[cols="1,3"]
+|===
+| Strategy | Description
+
+| Pause
+| Wait until the queue drains below the capacity threshold. Safest default — no messages lost — but the producer is blocked.
+
+| DropVolatile
+| Drop the lowest-priority messages first. Messages with `Volatile` or `Background` priority are eligible for immediate discard.
+
+| CoalesceState
+| Collapse State messages by `state_key`, keeping only the latest value. Useful for topics where intermediate snapshots are redundant.
+
+| Downgrade
+| Lower delivery frequency by deferring or throttling writes. The caller introduces artificial delays or batching.
+
+| Disconnect
+| Disconnect the slow consumer immediately. Use when partial delivery is worse than no delivery.
+
+| SnapshotLater
+| Switch the consumer to snapshot polling mode. Instead of streaming every message, the consumer polls for the latest snapshot on demand.
+|===
+
+=== Actions
+
+When the queue cannot accept a message, the server returns an action to the caller:
+
+[cols="1,3"]
+|===
+| Action | Description
+
+| Accept
+| Message was accepted into the queue. No further action needed.
+
+| Pause
+| Caller should pause the producer until capacity becomes available.
+
+| DropVolatile
+| Caller should drop messages whose priority is `Volatile` or `Background`.
+
+| CoalesceState
+| Caller should coalesce state messages sharing the same `state_key`.
+
+| Downgrade
+| Caller should downgrade the connection's delivery frequency.
+
+| Disconnect
+| Caller should disconnect the slow consumer.
+
+| SnapshotLater
+| Caller should switch the consumer to snapshot polling mode.
+|===
+
+== Priority Levels
+
+Priority determines both send order (higher first) and drop order under
+backpressure (lower dropped first):
+
+[cols="1,1,3"]
+|===
+| Value | Name | Use Case
+
+| 0
+| Background
+| Background tasks (e.g. metrics reporting). First to be dropped.
+
+| 1
+| Volatile
+| Volatile messages. First to be dropped under backpressure.
+
+| 2
+| Low
+| Low-priority business messages.
+
+| 3
+| Normal
+| Normal business messages (default).
+
+| 4
+| High
+| High-priority business messages.
+
+| 5
+| Critical
+| Critical messages (e.g. system alerts). Never dropped due to backpressure.
+|===
+
+== Rate Limiting
+
+A token-bucket rate limiter enforces per-second throughput caps with configurable
+burst tolerance.
+
+=== Algorithm
+
+- The bucket holds a maximum of `burst` tokens.
+- Tokens are replenished at a constant rate of `rps` tokens per second, up to the burst cap.
+- Consumers call `try_take` or `try_take_n` to atomically check-and-decrement the token count.
+- Returns `false` when insufficient tokens are available (no tokens consumed on failure).
+
+=== Per-Connection / Per-Topic Limiting
+
+The `RateLimitTable` maps arbitrary string keys (e.g. `"conn:<id>:topic:<name>"`)
+to independent `RateLimiter` instances, created lazily on first access.
+This allows distinct limits per connection, per topic, or per connection-topic pair.
+
+== Flow Control Frames
+
+The server uses Flow frames (`frame_type = F`) to inform the client of the
+current load status. The client adjusts its send rate or pauses accordingly.
+
+== Conformance
+
+Implementations MUST:
+
+- Monitor outbound queue depth per connection.
+- Apply the configured backpressure strategy when the high-water mark is reached.
+- Support at minimum the `Pause` and `DropVolatile` strategies.
+- Emit flow-pause and flow-resume events for metrics.
+- Enforce rate limits when configured; reject excess frames with `TopicRateLimited`.
