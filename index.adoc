@@ -1,0 +1,137 @@
+TPLs — Rift Implementation Possibilities
+=========================================
+
+TPL stands for **TPL — Technical Protocol Listing**.
+TPLs exist to document what must, should, or may be implemented by Rift-compatible
+_server_ and _client_ software.
+
+Each TPL is a focused specification document covering a single aspect of the
+Rift Realtime Protocol (Rift/1). They are designed to be read independently
+while cross-referencing each other where necessary.
+
+== Table of TPLs
+
+[cols="1,2,1,1"]
+|===
+| TPL | Title | Status | Audience
+
+| link:TPL-FRAME-1.adoc[TPL-FRAME-1]
+| Frame Envelope
+| `mandatory`
+| server, client
+
+| link:TPL-CODEC-1.adoc[TPL-CODEC-1]
+| Codec Negotiation
+| `mandatory`
+| server, client
+
+| link:TPL-MSG-1.adoc[TPL-MSG-1]
+| Message Types
+| `mandatory`
+| server, client
+
+| link:TPL-TOPIC-1.adoc[TPL-TOPIC-1]
+| Topic Profiles
+| `mandatory`
+| server
+
+| link:TPL-SUB-1.adoc[TPL-SUB-1]
+| Subscribe Modes
+| `mandatory`
+| server, client
+
+| link:TPL-ACK-1.adoc[TPL-ACK-1]
+| Acknowledgement System
+| `mandatory`
+| server, client
+
+| link:TPL-SESSION-1.adoc[TPL-SESSION-1]
+| Session & Resume
+| `mandatory`
+| server, client
+
+| link:TPL-HANDSHAKE-1.adoc[TPL-HANDSHAKE-1]
+| Hello / Welcome / Ready Handshake
+| `mandatory`
+| server, client
+
+| link:TPL-AUTH-1.adoc[TPL-AUTH-1]
+| Authentication
+| `mandatory`
+| server, client
+
+| link:TPL-FLOW-1.adoc[TPL-FLOW-1]
+| Flow Control
+| `mandatory`
+| server
+
+| link:TPL-HEARTBEAT-1.adoc[TPL-HEARTBEAT-1]
+| Heartbeat
+| `mandatory`
+| server, client
+
+| link:TPL-ERROR-1.adoc[TPL-ERROR-1]
+| Error Codes
+| `mandatory`
+| server, client
+
+| link:TPL-CLOSE-1.adoc[TPL-CLOSE-1]
+| Close Codes
+| `mandatory`
+| server, client
+
+| link:TPL-VERSION-1.adoc[TPL-VERSION-1]
+| Protocol Versioning
+| `mandatory`
+| server, client
+
+| link:TPL-CONFIG-1.adoc[TPL-CONFIG-1]
+| Server Configuration
+| `optional`
+| server
+|===
+
+== Protocol Overview
+
+The Rift Realtime Protocol (Rift/1) is a modern, real-time bidirectional messaging
+protocol designed to replace raw WebSocket + event-string models with stronger semantics.
+
+=== Key Features
+
+* Typed frame envelope with priority and flags
+* CBOR + JSON codec negotiation
+* Eight message classes (Event, Command, Reply, State, Datagram, Stream, Snapshot, System)
+* Topic-based pub/sub with retention and ordering policies
+* Session management with auth and disconnect-resume
+* Acknowledgement system with 9 status levels and 6 policies
+* Backpressure control (6 strategies) and token-bucket rate limiting
+* Heartbeat with jitter for thundering-herd prevention
+
+=== Connection Lifecycle
+
+```text
+WebSocket Open
+  → Hello (client → server)
+  → Welcome (server → client)
+  → [Resume exchange, optional]
+  → Ready (server → client)
+  → [Data frames flow bidirectionally]
+  → Close (either side)
+```
+
+=== Repositories
+
+[cols="1,2"]
+|===
+| Repository | Description
+
+| https://github.com/lazhenyi/rifts[rifts (Rust)]
+| Server-side implementation. Supports standalone WebSocket and framework adapters (Axum, Actix Web, Warp, Ntex).
+
+| https://github.com/rift-proto/rift-ts[rift-ts (TypeScript)]
+| TypeScript client SDK for browser and Node.js.
+|===
+
+== License
+
+Dual-licensed under MIT or Apache-2.0.

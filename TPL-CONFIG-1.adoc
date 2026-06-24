@@ -1,0 +1,87 @@
+TPL-CONFIG-1
+=============
+Server Configuration
+--------------------
+`optional` `server`
+
+This TPL defines the tunable parameters for a Rift/1 server implementation.
+
+== Configuration Parameters
+
+[cols="2,1,3"]
+|===
+| Parameter | Default | Description
+
+| `max_payload_bytes`
+| 65,536 (64 KiB)
+| Maximum payload size in bytes for a single frame. Frames exceeding this limit are rejected at the decoding stage with `RIFT_PROTOCOL_PAYLOAD_TOO_LARGE`.
+
+| `max_topics_per_connection`
+| 128
+| Maximum number of topics a single connection can subscribe to simultaneously. Excess subscribe requests are rejected.
+
+| `max_send_queue_bytes`
+| 1,048,576 (1 MiB)
+| Maximum byte size of the outbound send queue per connection. When exceeded, the connection enters slow-consumer state and backpressure is triggered.
+
+| `heartbeat`
+| see TPL-HEARTBEAT-1
+| Heartbeat policy controlling ping/pong intervals and timeout detection.
+
+| `idle_timeout`
+| 300 s
+| If no frames (including heartbeats) are received within this window, the server actively closes the connection.
+
+| `reconnect_base_ms`
+| 500
+| Suggested initial reconnect wait time for the client (base interval for exponential backoff).
+
+| `reconnect_max_ms`
+| 15,000
+| Suggested maximum reconnect wait time for the client (caps the exponential backoff).
+
+| `replay_window`
+| 300 s
+| Duration for which message offsets are retained, allowing clients to request replay of missed messages after reconnecting.
+
+| `dedupe_window`
+| 60 s
+| Duration within which messages with the same `dedupe_key` are detected as duplicates and discarded.
+
+| `max_auth_failures`
+| 3
+| Maximum number of consecutive authentication failures per connection before forced disconnection.
+
+| `codec_offer`
+| all compiled-in
+| List of available codecs offered to clients during the Hello phase. Empty means all.
+
+| `default_topic_profile`
+| see TPL-TOPIC-1
+| Default profile applied when a topic is auto-created on first subscribe.
+|===
+
+== Typical Web Application Defaults
+
+These defaults (§27.1) are tuned for typical browser-based clients on commodity networks:
+
+```yaml
+max_payload_bytes: 65536
+max_topics_per_connection: 128
+max_send_queue_bytes: 1048576
+idle_timeout: 300s
+replay_window: 300s
+dedupe_window: 60s
+max_auth_failures: 3
+```
+
+High-throughput or low-latency deployments may wish to adjust these values.
+
+== Conformance
+
+Implementations MUST:
+
+- Enforce `max_payload_bytes` at the decoding stage.
+- Enforce `max_topics_per_connection` and reject excess subscribe requests.
+- Close connections that exceed `idle_timeout` with close code `IdleTimeout` (1013).
+- Close connections that exceed `max_auth_failures` with close code `AuthFailed` (1004).
