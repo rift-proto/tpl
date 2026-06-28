@@ -213,7 +213,7 @@ Rift/1.0 = 0x0100 (256)
 | Project | Repository | Language
 
 | rifts
-| https://github.com/lazhenyi/rifts[github.com/lazhenyi/rifts]
+| https://github.com/rift-proto/rifts[github.com/rift-proto/rifts]
 | Rust
 
 | rift-ts

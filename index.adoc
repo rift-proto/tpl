@@ -125,7 +125,7 @@ WebSocket Open
 |===
 | Repository | Description
 
-| https://github.com/lazhenyi/rifts[rifts (Rust)]
+| https://github.com/rift-proto/rifts[rifts (Rust)]
 | Server-side implementation. Supports standalone WebSocket and framework adapters (Axum, Actix Web, Warp, Ntex).
 
 | https://github.com/rift-proto/rift-ts[rift-ts (TypeScript)]
