@@ -1,0 +1,300 @@
+= Rift Realtime Protocol / 1.0 — TPL Specifications
+Zhenyi <434836402@qq.com>
+v1.0, 2026-05-18
+:toc: left
+:sectnums:
+:source-highlighter: rouge
+
+== Introduction
+
+*TPL* (Technical Protocol Listing) is the specification format for the
+*Rift Realtime Protocol (Rift/1)* — a modern, real-time bidirectional messaging
+protocol built on WebSocket, designed to replace raw `JSON.stringify`-over-socket
+patterns with typed frames, explicit delivery semantics, and production-grade
+session management.
+
+This directory contains the complete Rift/1 wire protocol specification,
+organized as individual TPL documents — one per protocol scope.
+
+=== What is Rift?
+
+Rift is to realtime messaging what HTTP/2 was to HTTP/1: a structured, multiplexed,
+semantically-rich framing layer on top of a familiar transport (WebSocket).
+
+It gives you:
+
+* **Typed message classes** instead of ad-hoc event strings
+* **CBOR + JSON codec negotiation** — binary in production, JSON for debugging
+* **Session resume** — transparent reconnection without message loss
+* **Backpressure control** — six strategies to handle slow consumers
+* **Acknowledgement system** — nine status levels from received to delivered
+* **Topic profiles** — per-topic retention, ordering, and rate limits
+
+=== Quick Comparison
+
+[cols="1,1,1"]
+|===
+| Feature | Socket.IO | Rift/1
+
+| Framing
+| Custom packet protocol
+| Typed frame envelope (C/D/A/F/E)
+
+| Encoding
+| JSON only
+| CBOR + JSON negotiated
+
+| Delivery guarantees
+| Fire-and-forget
+| 6 delivery modes (AtMostOnce → DurableOrdered)
+
+| Session resume
+| Basic sid cookie
+| Epoch-based resume with offset tracking
+
+| Backpressure
+| None
+| 6 strategies + token-bucket rate limiting
+
+| Message types
+| Event only
+| 8 classes (Event, Command, Reply, State, Datagram, Stream, Snapshot, System)
+
+| Topics
+| String namespace
+| Profiles with retention, ordering, limits
+|===
+
+== Reading Order
+
+=== For Client Developers
+
+If you are building a client SDK or connecting to a Rift server:
+
+. link:TPL-FRAME-1.adoc[TPL-FRAME-1] — understand the frame envelope
+. link:TPL-CODEC-1.adoc[TPL-CODEC-1] — learn how encoding is negotiated
+. link:TPL-HANDSHAKE-1.adoc[TPL-HANDSHAKE-1] — connect and authenticate
+. link:TPL-MSG-1.adoc[TPL-MSG-1] — publish and receive messages
+. link:TPL-SUB-1.adoc[TPL-SUB-1] — subscribe to topics
+. link:TPL-HEARTBEAT-1.adoc[TPL-HEARTBEAT-1] — keep the connection alive
+. link:TPL-ERROR-1.adoc[TPL-ERROR-1] — handle errors gracefully
+
+=== For Server Implementors
+
+If you are implementing a Rift server:
+
+. link:TPL-FRAME-1.adoc[TPL-FRAME-1] — frame parsing and encoding
+. link:TPL-VERSION-1.adoc[TPL-VERSION-1] — version negotiation
+. link:TPL-HANDSHAKE-1.adoc[TPL-HANDSHAKE-1] — handshake state machine
+. link:TPL-AUTH-1.adoc[TPL-AUTH-1] — pluggable authentication
+. link:TPL-SESSION-1.adoc[TPL-SESSION-1] — session lifecycle and resume
+. link:TPL-TOPIC-1.adoc[TPL-TOPIC-1] — topic profiles, retention, ordering
+. link:TPL-MSG-1.adoc[TPL-MSG-1] — message routing and delivery semantics
+. link:TPL-ACK-1.adoc[TPL-ACK-1] — acknowledgement tracking
+. link:TPL-FLOW-1.adoc[TPL-FLOW-1] — backpressure and rate limiting
+. link:TPL-HEARTBEAT-1.adoc[TPL-HEARTBEAT-1] — heartbeat policy
+. link:TPL-ERROR-1.adoc[TPL-ERROR-1] — error code reference
+. link:TPL-CLOSE-1.adoc[TPL-CLOSE-1] — close code reference
+. link:TPL-CONFIG-1.adoc[TPL-CONFIG-1] — tunable parameters
+
+=== Quick Reference
+
+If you just need to look something up:
+
+* Error code? → link:TPL-ERROR-1.adoc[TPL-ERROR-1]
+* Close code? → link:TPL-CLOSE-1.adoc[TPL-CLOSE-1]
+* Frame format? → link:TPL-FRAME-1.adoc[TPL-FRAME-1]
+* Server config defaults? → link:TPL-CONFIG-1.adoc[TPL-CONFIG-1]
+
+== Architecture Overview
+
+=== Frame Layer
+
+Everything in Rift — handshake, data, ack, flow control, errors — travels inside
+a single *Frame* envelope:
+
+```text
+┌─────────────────────────────────────────────────────┐
+│  Frame                                              │
+│  ┌──────────┬──────────┬──────────┬───────────────┐ │
+│  │ version  │ frame_id │ frame_type (C/D/A/F/E)  │ │
+│  │ codec    │ flags    │ priority │ timestamp     │ │
+│  ├──────────┴──────────┴──────────┴───────────────┤ │
+│  │ topic · event · session_id · correlation_id   │ │
+│  │ message_id · stream_id · trace_id             │ │
+│  ├────────────────────────────────────────────────┤ │
+│  │ payload (JSON or CBOR encoded)                │ │
+│  └────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────┘
+```
+
+=== Connection Lifecycle
+
+```text
+Client                              Server
+  │                                     │
+  │ ══════ TCP / WebSocket open ══════  │
+  │                                     │
+  │──── Hello ───────────────────────> │  capabilities + auth
+  │                                     │
+  │<─── Welcome ────────────────────── │  session + codec
+  │                                     │
+  │   [optional Resume exchange]        │
+  │                                     │
+  │<─── Ready ───────────────────────  │  limits + heartbeat
+  │                                     │
+  │ ══════ bidirectional data ════════  │
+  │                                     │
+  │──── Close ───────────────────────> │  (either side)
+```
+
+=== Message Flow
+
+```text
+Publisher                     Broker                      Subscriber
+  │                             │                             │
+  │── Data { event } ────────>│                             │
+  │                             │── fan-out ───────────────>│
+  │<── Ack { persisted } ─────│                             │
+  │                             │                             │
+  │── Data { command } ──────>│                             │
+  │                             │── dispatch ──────────────>│
+  │                             │<─ Data { reply } ─────────│
+  │<── Data { reply } ────────│                             │
+```
+
+== Specification Index
+
+See link:index.adoc[index.adoc] for the full specification index with links to every TPL document.
+
+== Wire Constants Quick Reference
+
+=== Frame Type Tags
+
+`C` Control · `D` Data · `A` Ack · `F` Flow · `E` Error
+
+=== Codec Tags
+
+`J` JSON · `B` CBOR
+
+=== Priority Levels
+
+`0` Background · `1` Volatile · `2` Low · `3` Normal · `4` High · `5` Critical
+
+=== Frame Flag Bits
+
+[cols="1,1,3"]
+|===
+| Bit | Name | Meaning
+
+| 0  | COMPRESSED      | Payload is compressed
+| 1  | ENCRYPTED       | Payload is encrypted
+| 2  | FRAGMENTED      | Frame is fragmented (not final)
+| 3  | FINAL_FRAGMENT  | Last fragment of a fragmented frame
+| 4  | REQUIRES_ACK    | Receiver must acknowledge
+| 5  | REPLAYED        | Replay frame (after disconnect-resume)
+| 6  | SNAPSHOT        | Snapshot frame (current topic state)
+| 7  | DEGRADED        | Degraded-mode frame
+| 8  | DUPLICATE       | Server detected duplicate
+| 9  | TRACE           | Frame carries tracing context
+|===
+
+=== Version Encoding
+
+```text
+encoded = major << 8 | minor
+Rift/1.0 = 0x0100 (256)
+```
+
+== Implementations
+
+[cols="1,2,1"]
+|===
+| Project | Repository | Language
+
+| rifts
+| https://github.com/lazhenyi/rifts[github.com/lazhenyi/rifts]
+| Rust
+
+| rift-ts
+| https://github.com/rift-proto/rift-ts[github.com/rift-proto/rift-ts]
+| TypeScript
+|===
+
+=== Server (rifts)
+
+The `rifts` crate is a Rust server implementation supporting:
+
+* Standalone WebSocket transport via `tokio-tungstenite`
+* Framework adapters: Axum, Actix Web, Warp, Ntex
+* In-memory broker with fan-out, deduplication, and snapshot support
+* Pluggable authentication (`AuthProvider` trait)
+* Persistent storage via optional `sled` backend
+
+[source,rust]
+----
+use rifts::RiftServer;
+use std::sync::Arc;
+use tokio::sync::Notify;
+
+#[tokio::main]
+async fn main() -> rifts::Result<()> {
+    let shutdown = Arc::new(Notify::new());
+    let server = RiftServer::builder()
+        .websocket_transport()
+        .build()?;
+    server.run("127.0.0.1:9000".parse().unwrap(), shutdown).await?;
+    Ok(())
+}
+----
+
+=== Client (rift-ts)
+
+TypeScript client SDK for browser and Node.js:
+
+[source,typescript]
+----
+import { RiftClient } from 'rift-ts';
+
+const client = new RiftClient('ws://localhost:9000', {
+  clientId: 'my-app',
+  token:    'my-jwt',
+});
+
+client.on('event', (topic, event) => console.log(topic, event));
+await client.connect();
+await client.subscribe('room/1', 'live');
+client.publish('room/1', 'chat.message.created', 'chat.message.created@1.0', { text: 'hi' });
+----
+
+== Contributing
+
+TPLs follow the NIPs model: each specification is a standalone document that can
+be discussed and evolved independently. To propose a new TPL or amend an existing one:
+
+. Fork the repository.
+. Add or modify the `.adoc` file following the established format.
+. Submit a pull request with a clear description of the change.
+
+=== TPL Format
+
+Each TPL follows this structure:
+
+```text
+TPL-{SCOPE}-{VERSION}
+======================
+Title
+-----
+`status` `audience`
+
+Content in AsciiDoc...
+```
+
+* *Scope* — short uppercase identifier for the protocol area (FRAME, MSG, SESSION, etc.)
+* *Version* — integer starting from 1; bump on breaking changes to the TPL itself
+* *Status* — `mandatory`, `optional`, or `draft`
+* *Audience* — `server`, `client`, or both
+
+== License
+
+Dual-licensed under *MIT* or *Apache-2.0*, at your option.
